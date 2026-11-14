@@ -2,21 +2,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 import pandas as pd
-import pandas_ta as ta
 import requests
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+# 請替換為你實際的 Streamlit 網站網址（結尾不要加斜線 /）
+WEB_APP_URL = "https://你的專屬網址.streamlit.app"
 TIMEFRAME = "15m"
 BINANCE_BASE_URL = "https://data-api.binance.vision/api/v3"
 
 
-def send_discord_message(title, description, color=15158332):
+def send_discord_message(title, description, color=15158332, url=None):
     if not DISCORD_WEBHOOK_URL:
         print("⚠️ 未設定 DISCORD_WEBHOOK_URL，略過發送")
         return
-    payload = {
-        "embeds": [{"title": title, "description": description, "color": color}]
-    }
+    embed = {"title": title, "description": description, "color": color}
+    if url:
+        embed["url"] = url
+    payload = {"embeds": [embed]}
     headers = {"Content-Type": "application/json"}
     try:
         requests.post(
@@ -73,14 +75,10 @@ def check_symbol(symbol):
         df["High"] = df["High"].astype(float)
         df["Low"] = df["Low"].astype(float)
 
-        df["EMA144"] = ta.ema(df["Close"], length=144)
-        df["EMA169"] = ta.ema(df["Close"], length=169)
-        df["EMA576"] = ta.ema(df["Close"], length=576)
-        df["EMA676"] = ta.ema(df["Close"], length=676)
-
-        df = df.dropna(subset=["EMA676"])
-        if df.empty:
-            return None
+        df["EMA144"] = df["Close"].ewm(span=144, adjust=False).mean()
+        df["EMA169"] = df["Close"].ewm(span=169, adjust=False).mean()
+        df["EMA576"] = df["Close"].ewm(span=576, adjust=False).mean()
+        df["EMA676"] = df["Close"].ewm(span=676, adjust=False).mean()
 
         latest = df.iloc[-1]
         current_price = float(latest["Close"])
@@ -145,21 +143,31 @@ if __name__ == "__main__":
                     short_hits.append(res)
 
     for _, symbol, price, low_p, channel in long_hits:
+        direct_url = f"{WEB_APP_URL}/?symbol={symbol}&timeframe={TIMEFRAME}"
         msg = (
             f"**交易對:** {symbol}\n**收盤價:** `{price:.4f}` | **最低價:**"
-            f" `{low_p:.4f}`\n🟢 **作多回踩支撐** ({channel})"
+            f" `{low_p:.4f}`\n🟢 **作多回踩支撐** ({channel})\n\n📊"
+            f" [點此直接開啟 {symbol} 維加斯通道圖表]({direct_url})"
         )
         send_discord_message(
-            f"📌 [多頭回踩支撐] {symbol} ({TIMEFRAME})", msg, color=3066993
+            f"📌 [多頭回踩支撐] {symbol} ({TIMEFRAME})",
+            msg,
+            color=3066993,
+            url=direct_url,
         )
 
     for _, symbol, price, high_p, channel in short_hits:
+        direct_url = f"{WEB_APP_URL}/?symbol={symbol}&timeframe={TIMEFRAME}"
         msg = (
             f"**交易對:** {symbol}\n**收盤價:** `{price:.4f}` | **最高價:**"
-            f" `{high_p:.4f}`\n🔴 **作空反彈遇阻** ({channel})"
+            f" `{high_p:.4f}`\n🔴 **作空反彈遇阻** ({channel})\n\n📊"
+            f" [點此直接開啟 {symbol} 維加斯通道圖表]({direct_url})"
         )
         send_discord_message(
-            f"⚠️ [空頭反彈遇阻] {symbol} ({TIMEFRAME})", msg, color=15158332
+            f"⚠️ [空頭反彈遇阻] {symbol} ({TIMEFRAME})",
+            msg,
+            color=15158332,
+            url=direct_url,
         )
 
     print(
