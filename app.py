@@ -8,10 +8,22 @@ import streamlit as st
 st.set_page_config(page_title="加密貨幣維加斯多空雷達", layout="wide")
 st.title("📡 加密貨幣維加斯【多/空】純回踩雷達")
 
+# 讀取 URL 網址參數（例如 ?symbol=SOLUSDT&timeframe=15m）
+query_params = st.query_params
+url_symbol = query_params.get("symbol", None)
+url_timeframe = query_params.get("timeframe", None)
+
+timeframe_options = ["15m", "1h", "4h", "1d"]
+default_tf_index = (
+    timeframe_options.index(url_timeframe)
+    if url_timeframe in timeframe_options
+    else 1
+)
+
 with st.sidebar:
     st.header("⚙️ 掃描參數設定")
     timeframe = st.selectbox(
-        "K 線時間級別", ["15m", "1h", "4h", "1d"], index=1
+        "K 線時間級別", timeframe_options, index=default_tf_index
     )
     scan_limit = st.slider(
         "掃描成交量前 N 大幣種", min_value=10, max_value=100, value=30, step=10
@@ -41,6 +53,7 @@ def get_top_usdt_pairs(limit=30):
     return [item["symbol"] for item in usdt_pairs[:limit]]
 
 
+@st.cache_data(ttl=60)
 def analyze_symbol(symbol, timeframe):
     try:
         url = f"{BINANCE_BASE_URL}/klines?symbol={symbol}&interval={timeframe}&limit=750"
@@ -68,7 +81,6 @@ def analyze_symbol(symbol, timeframe):
         for col in ["Open", "High", "Low", "Close"]:
             df[col] = df[col].astype(float)
 
-        # 使用原生 pandas 計算維加斯通道 EMA（與 pandas_ta 演算法完全一致）
         df["EMA144"] = df["Close"].ewm(span=144, adjust=False).mean()
         df["EMA169"] = df["Close"].ewm(span=169, adjust=False).mean()
         df["EMA576"] = df["Close"].ewm(span=576, adjust=False).mean()
@@ -143,66 +155,12 @@ def run_market_scan(timeframe, limit):
     return results
 
 
-if st.button("🔄 立即重新掃描市場", type="primary"):
-    st.cache_data.clear()
-
-with st.spinner(
-    f"正在平行掃描前 {scan_limit} 大加密貨幣 ({timeframe} 級別)..."
-):
-    all_results = run_market_scan(timeframe, scan_limit)
-
-triggered = [r for r in all_results if r["signal"] is not None]
-long_list = [r for r in triggered if "作多" in r["signal"]]
-short_list = [r for r in triggered if "作空" in r["signal"]]
-
-col1, col2, col3 = st.columns(3)
-col1.metric("掃描幣種總數", f"{len(all_results)} 檔")
-col2.metric("🟢 多頭回踩支撐", f"{len(long_list)} 檔")
-col3.metric("🔴 空頭反彈遇阻", f"{len(short_list)} 檔")
-
-if enable_discord and webhook_url and triggered:
-    desc = "\n".join([
-        f"**{r['symbol']}** | {r['signal']} | {r['channel']} | 現價: `{r['price']:.4f}`"
-        for r in triggered
-    ])
-    payload = {
-        "embeds": [{
-            "title": f"📡 網頁雷達掃描結果 ({timeframe})",
-            "description": desc,
-            "color": 3066993,
-        }]
-    }
-    requests.post(
-        webhook_url,
-        data=json.dumps(payload),
-        headers={"Content-Type": "application/json"},
-        timeout=5,
-    )
-    st.toast("✅ 已將符合條件的訊號發送至 Discord！")
-
-st.divider()
-
-if triggered:
-    st.subheader("🎯 符合維加斯通道回踩條件標的")
-    table_data = [
-        {
-            "交易對": r["symbol"],
-            "訊號方向": r["signal"],
-            "觸及通道": r["channel"],
-            "當前收盤價": round(r["price"], 4),
-            "當根最高價": round(r["high"], 4),
-            "當根最低價": round(r["low"], 4),
-        }
-        for r in triggered
-    ]
-    st.dataframe(pd.DataFrame(table_data), use_container_width=True)
-
-    selected_sym = st.selectbox(
-        "📊 選擇標的檢視維加斯通道圖表：", [r["symbol"] for r in triggered]
-    )
-    target_data = next(r for r in triggered if r["symbol"] == selected_sym)
+def render_vegas_chart(target_data, tf):
+    """繪製單一幣種維加斯通道互動式 K 線圖"""
     chart_df = target_data["df"]
-
+    status_label = (
+        target_data["signal"] if target_data["signal"] else "👀 觀察中"
+    )
     fig = go.Figure()
     fig.add_trace(
         go.Candlestick(
@@ -246,14 +204,100 @@ if triggered:
             name="EMA 676",
         )
     )
-
     fig.update_layout(
-        title=f"{selected_sym} ({timeframe}) - {target_data['signal']}",
+        title=f"{target_data['symbol']} ({tf}) - {status_label}",
         xaxis_rangeslider_visible=False,
         height=550,
         template="plotly_dark",
     )
     st.plotly_chart(fig, use_container_width=True)
+
+
+# --- 1. 若網址帶有 ?symbol=XXX，優先直接顯示該幣種專屬圖表 ---
+if url_symbol:
+    clean_sym = url_symbol.upper().strip()
+    col_info, col_clear = st.columns([4, 1])
+    with col_info:
+        st.subheader(f"🎯 推播直達檢視：{clean_sym} ({timeframe})")
+    with col_clear:
+        if st.button("❌ 關閉單幣檢視"):
+            st.query_params.clear()
+            st.rerun()
+
+    direct_data = analyze_symbol(clean_sym, timeframe)
+    if direct_data:
+        m1, m2, m3 = st.columns(3)
+        m1.metric("當前收盤價", f"{direct_data['price']:.4f}")
+        m2.metric("當根最高 / 最低", f"{direct_data['high']:.4f} / {direct_data['low']:.4f}")
+        m3.metric(
+            "當前訊號狀態",
+            direct_data["signal"] if direct_data["signal"] else "無觸發",
+        )
+        render_vegas_chart(direct_data, timeframe)
+    else:
+        st.warning(f"無法取得 {clean_sym} 的足夠 K 線資料（可能為新上架幣種）。")
+    st.divider()
+
+# --- 2. 全市場熱門幣種掃描儀表板 ---
+if st.button("🔄 立即重新掃描市場", type="primary"):
+    st.cache_data.clear()
+
+with st.spinner(
+    f"正在平行掃描前 {scan_limit} 大加密貨幣 ({timeframe} 級別)..."
+):
+    all_results = run_market_scan(timeframe, scan_limit)
+
+triggered = [r for r in all_results if r["signal"] is not None]
+long_list = [r for r in triggered if "作多" in r["signal"]]
+short_list = [r for r in triggered if "作空" in r["signal"]]
+
+col1, col2, col3 = st.columns(3)
+col1.metric("掃描幣種總數", f"{len(all_results)} 檔")
+col2.metric("🟢 多頭回踩支撐", f"{len(long_list)} 檔")
+col3.metric("🔴 空頭反彈遇阻", f"{len(short_list)} 檔")
+
+if enable_discord and webhook_url and triggered:
+    desc = "\n".join([
+        f"**{r['symbol']}** | {r['signal']} | {r['channel']} | 現價: `{r['price']:.4f}`"
+        for r in triggered
+    ])
+    payload = {
+        "embeds": [{
+            "title": f"📡 網頁雷達掃描結果 ({timeframe})",
+            "description": desc,
+            "color": 3066993,
+        }]
+    }
+    requests.post(
+        webhook_url,
+        data=json.dumps(payload),
+        headers={"Content-Type": "application/json"},
+        timeout=5,
+    )
+    st.toast("✅ 已將符合條件的訊號發送至 Discord！")
+
+st.divider()
+
+if triggered:
+    st.subheader("📋 熱門幣種符合維加斯通道回踩清單")
+    table_data = [
+        {
+            "交易對": r["symbol"],
+            "訊號方向": r["signal"],
+            "觸及通道": r["channel"],
+            "當前收盤價": round(r["price"], 4),
+            "當根最高價": round(r["high"], 4),
+            "當根最低價": round(r["low"], 4),
+        }
+        for r in triggered
+    ]
+    st.dataframe(pd.DataFrame(table_data), use_container_width=True)
+
+    selected_sym = st.selectbox(
+        "📊 選擇清單內標的檢視維加斯通道圖表：", [r["symbol"] for r in triggered]
+    )
+    target_data = next(r for r in triggered if r["symbol"] == selected_sym)
+    render_vegas_chart(target_data, timeframe)
 else:
     st.info(
         f"目前前 {scan_limit} 大幣種在 {timeframe} 級別下，暫無符合維加斯回踩條件的標的。"
