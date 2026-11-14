@@ -6,7 +6,7 @@ import requests
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 # 請替換為你實際的 Streamlit 網站網址（結尾不要加斜線 /）
-WEB_APP_URL = "https://你的專屬網址.streamlit.app"
+WEB_APP_URL = "https://crypto-vegas-radar-xfjebl5gjnzus8fa2lly8w.streamlit.app/"
 TIMEFRAME = "15m"
 BINANCE_BASE_URL = "https://data-api.binance.vision/api/v3"
 
