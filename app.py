@@ -1,7 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import pandas as pd
-import pandas_ta as ta
 import plotly.graph_objects as go
 import requests
 import streamlit as st
@@ -69,16 +68,13 @@ def analyze_symbol(symbol, timeframe):
         for col in ["Open", "High", "Low", "Close"]:
             df[col] = df[col].astype(float)
 
-        df["EMA144"] = ta.ema(df["Close"], length=144)
-        df["EMA169"] = ta.ema(df["Close"], length=169)
-        df["EMA576"] = ta.ema(df["Close"], length=576)
-        df["EMA676"] = ta.ema(df["Close"], length=676)
+        # 使用原生 pandas 計算維加斯通道 EMA（與 pandas_ta 演算法完全一致）
+        df["EMA144"] = df["Close"].ewm(span=144, adjust=False).mean()
+        df["EMA169"] = df["Close"].ewm(span=169, adjust=False).mean()
+        df["EMA576"] = df["Close"].ewm(span=576, adjust=False).mean()
+        df["EMA676"] = df["Close"].ewm(span=676, adjust=False).mean()
 
-        df_valid = df.dropna(subset=["EMA676"])
-        if df_valid.empty:
-            return None
-
-        latest = df_valid.iloc[-1]
+        latest = df.iloc[-1]
         current_price = float(latest["Close"])
         high_price = float(latest["High"])
         low_price = float(latest["Low"])
@@ -125,7 +121,7 @@ def analyze_symbol(symbol, timeframe):
             "low": low_price,
             "signal": signal_type,
             "channel": channel_type,
-            "df": df_valid.tail(150),
+            "df": df.tail(150),
         }
     except Exception:
         return None
