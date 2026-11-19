@@ -20,6 +20,9 @@ default_tf_index = (
     else 1
 )
 
+# 嘗試從 Streamlit Secrets 自動讀取預設 Webhook
+default_webhook = st.secrets.get("DISCORD_WEBHOOK_URL", "")
+
 with st.sidebar:
     st.header("⚙️ 掃描參數設定")
     timeframe = st.selectbox(
@@ -31,8 +34,9 @@ with st.sidebar:
     enable_discord = st.checkbox("同時推播結果至 Discord", value=False)
     webhook_url = st.text_input(
         "Discord Webhook URL",
+        value=default_webhook,
         type="password",
-        help="請勿將真實網址寫死在公開程式碼中",
+        help="已設定 Streamlit Secrets 時會自動帶入，無需手動輸入",
     )
 
 BINANCE_BASE_URL = "https://data-api.binance.vision/api/v3"
